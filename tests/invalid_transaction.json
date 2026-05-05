@@ -1,0 +1,7 @@
+{
+  "transaction_id": "tx-XXXX",
+  "account": "bad-account",
+  "amount": -50,
+  "country": "mex",
+  "merchant": "Unknown"
+}

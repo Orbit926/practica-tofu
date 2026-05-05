@@ -1,0 +1,39 @@
+# Terraform / OpenTofu
+# --------------------------------
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+# NOTE: .terraform.lock.hcl should be committed — it pins provider versions
+#       for reproducible deploys across machines.
+
+# Sensitive overrides (never commit secrets or local overrides)
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Lambda build artifacts
+*.zip
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# Local logs
+*.log
+*.out
+crash.log
+crash.*.log
+
+# Operating System
+.DS_Store
+.idea/
+*.swp
+*.swo

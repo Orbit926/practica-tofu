@@ -1,0 +1,183 @@
+name: Integration Tests – Banking Transaction Processor
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+env:
+  AWS_REGION: us-east-1
+  STATE_MACHINE_NAME: banking-transaction-processor-dev
+
+jobs:
+  integration-tests:
+    name: Run Step Function Test Cases
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve State Machine ARN
+        id: resolve_arn
+        run: |
+          ARN=$(aws stepfunctions list-state-machines \
+            --query "stateMachines[?name=='${{ env.STATE_MACHINE_NAME }}'].stateMachineArn" \
+            --output text)
+          echo "ARN=$ARN" >> "$GITHUB_OUTPUT"
+          echo "State Machine ARN: $ARN"
+
+      - name: Test 1 – approved_mx_low (expects route=approved)
+        run: |
+          EXEC_ARN=$(aws stepfunctions start-execution \
+            --state-machine-arn "${{ steps.resolve_arn.outputs.ARN }}" \
+            --input file://tests/approved_mx_low.json \
+            --query executionArn --output text)
+          echo "Execution ARN: $EXEC_ARN"
+
+          STATUS=""
+          for i in $(seq 1 12); do
+            STATUS=$(aws stepfunctions describe-execution \
+              --execution-arn "$EXEC_ARN" \
+              --query status --output text)
+            echo "  Attempt $i: $STATUS"
+            [ "$STATUS" = "RUNNING" ] || break
+            sleep 5
+          done
+
+          OUTPUT=$(aws stepfunctions describe-execution \
+            --execution-arn "$EXEC_ARN" \
+            --query output --output text)
+          echo "Output: $OUTPUT"
+
+          ROUTE=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['route'])")
+          echo "Route: $ROUTE"
+
+          if [ "$STATUS" != "SUCCEEDED" ]; then
+            echo "FAIL: execution status is '$STATUS', expected SUCCEEDED"
+            exit 1
+          fi
+          if [ "$ROUTE" != "approved" ]; then
+            echo "FAIL: route is '$ROUTE', expected 'approved'"
+            exit 1
+          fi
+          echo "PASS: approved_mx_low"
+
+      - name: Test 2 – review_large_amount (expects route=review)
+        run: |
+          EXEC_ARN=$(aws stepfunctions start-execution \
+            --state-machine-arn "${{ steps.resolve_arn.outputs.ARN }}" \
+            --input file://tests/review_large_amount.json \
+            --query executionArn --output text)
+          echo "Execution ARN: $EXEC_ARN"
+
+          STATUS=""
+          for i in $(seq 1 12); do
+            STATUS=$(aws stepfunctions describe-execution \
+              --execution-arn "$EXEC_ARN" \
+              --query status --output text)
+            echo "  Attempt $i: $STATUS"
+            [ "$STATUS" = "RUNNING" ] || break
+            sleep 5
+          done
+
+          OUTPUT=$(aws stepfunctions describe-execution \
+            --execution-arn "$EXEC_ARN" \
+            --query output --output text)
+          echo "Output: $OUTPUT"
+
+          ROUTE=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['route'])")
+          echo "Route: $ROUTE"
+
+          if [ "$STATUS" != "SUCCEEDED" ]; then
+            echo "FAIL: execution status is '$STATUS', expected SUCCEEDED"
+            exit 1
+          fi
+          if [ "$ROUTE" != "review" ]; then
+            echo "FAIL: route is '$ROUTE', expected 'review'"
+            exit 1
+          fi
+          echo "PASS: review_large_amount"
+
+      - name: Test 3 – review_foreign_country (expects route=review)
+        run: |
+          EXEC_ARN=$(aws stepfunctions start-execution \
+            --state-machine-arn "${{ steps.resolve_arn.outputs.ARN }}" \
+            --input file://tests/review_foreign_country.json \
+            --query executionArn --output text)
+          echo "Execution ARN: $EXEC_ARN"
+
+          STATUS=""
+          for i in $(seq 1 12); do
+            STATUS=$(aws stepfunctions describe-execution \
+              --execution-arn "$EXEC_ARN" \
+              --query status --output text)
+            echo "  Attempt $i: $STATUS"
+            [ "$STATUS" = "RUNNING" ] || break
+            sleep 5
+          done
+
+          OUTPUT=$(aws stepfunctions describe-execution \
+            --execution-arn "$EXEC_ARN" \
+            --query output --output text)
+          echo "Output: $OUTPUT"
+
+          ROUTE=$(echo "$OUTPUT" | python3 -c "import sys,json; print(json.load(sys.stdin)['route'])")
+          echo "Route: $ROUTE"
+
+          if [ "$STATUS" != "SUCCEEDED" ]; then
+            echo "FAIL: execution status is '$STATUS', expected SUCCEEDED"
+            exit 1
+          fi
+          if [ "$ROUTE" != "review" ]; then
+            echo "FAIL: route is '$ROUTE', expected 'review'"
+            exit 1
+          fi
+          echo "PASS: review_foreign_country"
+
+      - name: Test 4 – invalid_transaction (expects status=FAILED)
+        run: |
+          EXEC_ARN=$(aws stepfunctions start-execution \
+            --state-machine-arn "${{ steps.resolve_arn.outputs.ARN }}" \
+            --input file://tests/invalid_transaction.json \
+            --query executionArn --output text)
+          echo "Execution ARN: $EXEC_ARN"
+
+          STATUS=""
+          for i in $(seq 1 12); do
+            STATUS=$(aws stepfunctions describe-execution \
+              --execution-arn "$EXEC_ARN" \
+              --query status --output text)
+            echo "  Attempt $i: $STATUS"
+            [ "$STATUS" = "RUNNING" ] || break
+            sleep 5
+          done
+
+          echo "Final status: $STATUS"
+
+          if [ "$STATUS" != "FAILED" ]; then
+            echo "FAIL: execution status is '$STATUS', expected FAILED"
+            exit 1
+          fi
+          echo "PASS: invalid_transaction correctly ended in FAILED state"
+
+      - name: Verify S3 results were written
+        run: |
+          BUCKET="banking-transaction-processor-results-dev"
+          echo "Listing S3 bucket contents:"
+          aws s3 ls "s3://$BUCKET/" --recursive
+          COUNT=$(aws s3 ls "s3://$BUCKET/" --recursive | wc -l | tr -d ' ')
+          echo "Total objects in bucket: $COUNT"
+          if [ "$COUNT" -lt 3 ]; then
+            echo "FAIL: expected at least 3 objects in S3 (approved + 2x review), got $COUNT"
+            exit 1
+          fi
+          echo "PASS: S3 bucket contains $COUNT result objects"
